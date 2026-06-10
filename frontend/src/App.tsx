@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import axios from 'axios';
 import { 
   Folder, Film, ChevronRight, 
@@ -31,6 +31,14 @@ export default function App() {
   const [clipJobStatus, setClipJobStatus] = useState<any>({ queue: [], running: [] });
   const [sortAsc, setSortAsc] = useState(true);
   
+  // Pre-compute sets for efficient O(1) lookups
+  const { runningSet, queueSet, normalizePath } = useMemo(() => {
+    const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+    const runningSet = new Set(clipJobStatus?.running?.map((job: any) => normalizePath(job.video_path)) || []);
+    const queueSet = new Set(clipJobStatus?.queue?.map((job: any) => normalizePath(job.video_path)) || []);
+    return { runningSet, queueSet, normalizePath };
+  }, [clipJobStatus]);
+
   const [showBatchModal, setShowBatchModal] = useState(false);
   
   const [skipExisting, setSkipExisting] = useState<boolean>(() => {
@@ -483,22 +491,23 @@ export default function App() {
           </div>
         </div>
 
-        <div className="video-grid">
-          {[...files].filter(f => !f.is_dir)
-            .sort((a, b) => {
-              let result = 0;
-              if (sortMode === 'name') {
-                result = a.name.localeCompare(b.name);
-              } else if (sortMode === 'date') {
-                result = (a.modified_time || 0) - (b.modified_time || 0);
-              }
-              return sortAsc ? result : -result;
-            })
-            .map(f => {
-            const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase();
-            const isProcessing = jobStatus.status === 'running' && jobStatus.current_video === f.name;
-            const isClipping = clipJobStatus.running?.some((job: any) => normalizePath(job.video_path) === normalizePath(f.path));
-            const isClipQueued = clipJobStatus.queue?.some((job: any) => normalizePath(job.video_path) === normalizePath(f.path));
+        {/* Video map with optimized O(1) loopups inside */}
+            <div className="video-grid">
+              {[...files].filter(f => !f.is_dir)
+                .sort((a, b) => {
+                  let result = 0;
+                  if (sortMode === 'name') {
+                    result = a.name.localeCompare(b.name);
+                  } else if (sortMode === 'date') {
+                    result = (a.modified_time || 0) - (b.modified_time || 0);
+                  }
+                  return sortAsc ? result : -result;
+                })
+                .map(f => {
+                const isProcessing = jobStatus.status === 'running' && jobStatus.current_video === f.name;
+                const normalizedFilePath = normalizePath(f.path);
+                const isClipping = runningSet.has(normalizedFilePath);
+                const isClipQueued = queueSet.has(normalizedFilePath);
             
             return (
             <div id={`video-card-${encodeURIComponent(f.path).replace(/[^a-zA-Z0-9]/g, '_')}`} key={f.path} className={`video-card glass-panel ${selectedPaths.has(f.path) ? 'active' : ''} ${isProcessing ? 'processing' : ''}`}>
