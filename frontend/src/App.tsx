@@ -484,7 +484,12 @@ export default function App() {
         </div>
 
         <div className="video-grid">
-          {[...files].filter(f => !f.is_dir)
+          {(() => {
+            const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+            const runningPaths = new Set(clipJobStatus.running?.map((job: { video_path: string }) => normalizePath(job.video_path)) || []);
+            const queuedPaths = new Set(clipJobStatus.queue?.map((job: { video_path: string }) => normalizePath(job.video_path)) || []);
+
+            return [...files].filter(f => !f.is_dir)
             .sort((a, b) => {
               let result = 0;
               if (sortMode === 'name') {
@@ -495,10 +500,10 @@ export default function App() {
               return sortAsc ? result : -result;
             })
             .map(f => {
-            const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase();
             const isProcessing = jobStatus.status === 'running' && jobStatus.current_video === f.name;
-            const isClipping = clipJobStatus.running?.some((job: any) => normalizePath(job.video_path) === normalizePath(f.path));
-            const isClipQueued = clipJobStatus.queue?.some((job: any) => normalizePath(job.video_path) === normalizePath(f.path));
+            const normPath = normalizePath(f.path);
+            const isClipping = runningPaths.has(normPath);
+            const isClipQueued = queuedPaths.has(normPath);
             
             return (
             <div id={`video-card-${encodeURIComponent(f.path).replace(/[^a-zA-Z0-9]/g, '_')}`} key={f.path} className={`video-card glass-panel ${selectedPaths.has(f.path) ? 'active' : ''} ${isProcessing ? 'processing' : ''}`}>
@@ -584,7 +589,9 @@ export default function App() {
                 </div>
               </div>
             </div>
-          )})}
+            );
+          })
+          })()}
         </div>
       </div>
 
