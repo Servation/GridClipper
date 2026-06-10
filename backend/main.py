@@ -286,11 +286,15 @@ def start_batch_thumbnail(req: BatchJobRequest, background_tasks: BackgroundTask
     for s_dir in req.source_dirs:
         target_dir = Path(s_dir).resolve()
         if target_dir.is_dir():
+            existing_files = set()
+            if req.skip_existing:
+                existing_files = {e.name for e in os.scandir(target_dir) if e.is_file()}
+
             for entry in os.scandir(target_dir):
                 if entry.is_file() and os.path.splitext(entry.name)[1].lower() in valid_exts:
                     if req.skip_existing:
-                        out_path = os.path.splitext(entry.path)[0] + "_sheet.jpg"
-                        if os.path.exists(out_path):
+                        sheet_name = f"{os.path.splitext(entry.name)[0]}_sheet.jpg"
+                        if sheet_name in existing_files:
                             continue
                     job_manager.queue.append((str(Path(entry.path).resolve()), req_args))
                     added_count += 1
