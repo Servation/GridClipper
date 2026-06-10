@@ -37,6 +37,19 @@ class FileItem(BaseModel):
     tags: List[str] = []
     ai_matches: Optional[Dict[str, List[str]]] = None
 
+from functools import lru_cache
+
+@lru_cache(maxsize=10000)
+def _read_metadata(meta_path: str, mtime: float):
+    import json
+    try:
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            meta = json.load(f)
+            return meta.get("tags", []), meta.get("ai_matches", {})
+    except Exception as meta_e:
+        print(f"Error reading metadata: {meta_e}")
+        return [], {}
+
 @app.get("/api/files", response_model=List[FileItem])
 def list_files(dir_path: str = "."):
     target_dir = Path(dir_path).resolve()
@@ -55,48 +68,59 @@ def list_files(dir_path: str = "."):
                     base_name = c_entry.name.rsplit("_clip_", 1)[0]
                     clip_counts[base_name] = clip_counts.get(base_name, 0) + 1
 
+        # Pre-scan for sheets and metadata
+        sheets = set()
+        metadata_files = {}
+        videos = []
+        dirs = []
+
         for entry in os.scandir(target_dir):
             if entry.is_dir():
                 # Skip some hidden or cache dirs
                 if entry.name.startswith(".") or entry.name == "__pycache__":
                     continue
-                items.append(FileItem(
-                    name=entry.name,
-                    path=str(Path(entry.path).resolve()),
-                    is_dir=True
-                ))
+                dirs.append((entry.name, entry.path))
             elif entry.is_file():
-                ext = os.path.splitext(entry.name)[1].lower()
-                if ext in valid_exts:
-                    base_name = os.path.splitext(entry.name)[0]
-                    has_sheet = (target_dir / (base_name + "_sheet.jpg")).exists()
-                    clip_count = clip_counts.get(base_name, 0)
-                    
-                    tags = []
-                    ai_matches = {}
-                    metadata_path = target_dir / (base_name + "_metadata.json")
-                    if metadata_path.exists():
-                        try:
-                            import json
-                            with open(metadata_path, 'r', encoding='utf-8') as f:
-                                meta = json.load(f)
-                                tags = meta.get("tags", [])
-                                ai_matches = meta.get("ai_matches", {})
-                        except Exception as meta_e:
-                            print(f"Error reading metadata for {base_name}: {meta_e}")
-                    
-                    stat = entry.stat()
-                    items.append(FileItem(
-                        name=entry.name,
-                        path=str(Path(entry.path).resolve()),
-                        is_dir=False,
-                        has_contact_sheet=has_sheet,
-                        size_bytes=stat.st_size,
-                        modified_time=stat.st_mtime,
-                        clip_count=clip_count,
-                        tags=tags,
-                        ai_matches=ai_matches
-                    ))
+                name_lower = entry.name.lower()
+                if name_lower.endswith("_sheet.jpg"):
+                    sheets.add(entry.name)
+                elif name_lower.endswith("_metadata.json"):
+                    metadata_files[entry.name] = (entry.path, entry.stat().st_mtime)
+                else:
+                    ext = os.path.splitext(entry.name)[1].lower()
+                    if ext in valid_exts:
+                        videos.append((entry.name, entry.path, entry.stat()))
+
+        for name, path in dirs:
+            items.append(FileItem(
+                name=name,
+                path=str(Path(path).resolve()),
+                is_dir=True
+            ))
+
+        for name, path, stat in videos:
+            base_name = os.path.splitext(name)[0]
+            has_sheet = (base_name + "_sheet.jpg") in sheets
+            clip_count = clip_counts.get(base_name, 0)
+
+            tags = []
+            ai_matches = {}
+            meta_name = base_name + "_metadata.json"
+            if meta_name in metadata_files:
+                meta_path, meta_mtime = metadata_files[meta_name]
+                tags, ai_matches = _read_metadata(meta_path, meta_mtime)
+
+            items.append(FileItem(
+                name=name,
+                path=str(Path(path).resolve()),
+                is_dir=False,
+                has_contact_sheet=has_sheet,
+                size_bytes=stat.st_size,
+                modified_time=stat.st_mtime,
+                clip_count=clip_count,
+                tags=tags,
+                ai_matches=ai_matches
+            ))
     except Exception as e:
         print(f"Error scanning directory {target_dir}: {e}")
         
