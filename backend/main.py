@@ -130,7 +130,20 @@ def list_files(dir_path: str = "."):
 
 @app.get("/api/select-folder")
 def select_folder():
-    # Hide the root tkinter window
+    try:
+        import webview
+        if len(webview.windows) > 0:
+            window = webview.windows[0]
+            result = window.create_file_dialog(webview.FOLDER_DIALOG)
+            if result and len(result) > 0:
+                return {"path": result[0]}
+            return {"path": ""}
+    except ImportError:
+        pass
+
+    # Hide the root tkinter window (fallback)
+    import tkinter as tk
+    from tkinter import filedialog
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)  # Bring to front

@@ -25,6 +25,24 @@ export default function App() {
   });
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [visibleCount, setVisibleCount] = useState(50);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [currentPath]);
+
+  const observer = useRef<IntersectionObserver | null>(null);
+  const loadMoreRef = React.useCallback((node: HTMLDivElement | null) => {
+    if (observer.current) observer.current.disconnect();
+    if (!node) return;
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        setVisibleCount(prev => prev + 50);
+      }
+    }, { rootMargin: '400px' });
+    observer.current.observe(node);
+  }, []);
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
   
   const [sortMode, setSortMode] = useState<'name' | 'date'>('name');
@@ -120,7 +138,12 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  const fetchLock = useRef(false);
+
   const fetchFiles = async (dirPath: string, isRefresh = false) => {
+    if (fetchLock.current) return;
+    fetchLock.current = true;
+    if (!isRefresh) setIsLoading(true);
     try {
       const res = await axios.get(`${API_BASE}/files`, { params: { dir_path: dirPath } });
       setFiles(res.data);
@@ -130,6 +153,9 @@ export default function App() {
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      if (!isRefresh) setIsLoading(false);
+      fetchLock.current = false;
     }
   };
 
@@ -282,7 +308,7 @@ export default function App() {
       <div className="app-container" style={{ display: clippingVideo ? 'none' : 'flex' }}>
       <div className="sidebar" style={{ width: isNavCollapsed ? '60px' : '320px', minWidth: isNavCollapsed ? '60px' : '320px', transition: 'width 0.3s ease, min-width 0.3s ease', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden', padding: isNavCollapsed ? '0' : '1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: isNavCollapsed ? 'center' : 'space-between', alignItems: 'center', marginBottom: '1rem', padding: isNavCollapsed ? '1rem 0.5rem 0' : '1rem 1rem 0', flexShrink: 0 }}>
-          {!isNavCollapsed && <h2 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Folder size={20} /> Navigation</h2>}
+          {!isNavCollapsed && <h2 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Folder size={20} /> Navigation {isLoading && <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />}</h2>}
           <button className="glass-button" onClick={() => setIsNavCollapsed(!isNavCollapsed)} style={{ padding: '0.4rem' }}>
             {isNavCollapsed ? <Menu size={20} /> : <ChevronLeft size={20} />}
           </button>
@@ -454,12 +480,12 @@ export default function App() {
                   </label>
                 </div>
 
-                <button className="glass-button primary" style={{ width: '100%', marginTop: '1rem', display: 'flex', justifyContent: 'center', gap: '0.5rem' }} onClick={startBatchJob} disabled={jobStatus.status === 'running'}>
+                <button className="glass-button primary" style={{ width: '100%', marginTop: '1rem', display: 'flex', justifyContent: 'center', gap: '0.5rem' }} onClick={startBatchJob}>
                   <Play size={18} />
                   Start Batch ({selectedPaths.size} items)
                 </button>
 
-                <button className="glass-button danger" style={{ width: '100%', marginTop: '1rem', display: 'flex', justifyContent: 'center', gap: '0.5rem', border: '1px solid rgba(239, 68, 68, 0.5)', background: 'rgba(239, 68, 68, 0.15)' }} onClick={deleteSelectedVideos} disabled={jobStatus.status === 'running'}>
+                <button className="glass-button danger" style={{ width: '100%', marginTop: '1rem', display: 'flex', justifyContent: 'center', gap: '0.5rem', border: '1px solid rgba(239, 68, 68, 0.5)', background: 'rgba(239, 68, 68, 0.15)' }} onClick={deleteSelectedVideos}>
                   <Trash2 size={18} />
                   Delete {selectedPaths.size} Video{selectedPaths.size > 1 ? 's' : ''}
                 </button>
@@ -503,6 +529,7 @@ export default function App() {
                   }
                   return sortAsc ? result : -result;
                 })
+                .slice(0, visibleCount)
                 .map(f => {
                 const isProcessing = jobStatus.status === 'running' && jobStatus.current_video === f.name;
                 const normalizedFilePath = normalizePath(f.path);
@@ -594,6 +621,7 @@ export default function App() {
               </div>
             </div>
           )})}
+          <div ref={loadMoreRef} style={{ height: '20px', width: '100%' }} />
         </div>
       </div>
 
@@ -628,7 +656,7 @@ export default function App() {
               </label>
             </div>
 
-            <button className="glass-button primary" style={{ width: '100%', marginTop: '1rem', display: 'flex', justifyContent: 'center', gap: '0.5rem' }} onClick={startBatchJob} disabled={jobStatus.status === 'running'}>
+            <button className="glass-button primary" style={{ width: '100%', marginTop: '1rem', display: 'flex', justifyContent: 'center', gap: '0.5rem' }} onClick={startBatchJob}>
               <Play size={18} />
               Start Batch ({selectedPaths.size} items)
             </button>
@@ -640,7 +668,6 @@ export default function App() {
                 border: '1px solid rgba(239, 68, 68, 0.5)', background: 'rgba(239, 68, 68, 0.15)'
               }}
               onClick={deleteSelectedVideos}
-              disabled={jobStatus.status === 'running'}
             >
               <Trash2 size={18} />
               Delete {selectedPaths.size} Video{selectedPaths.size > 1 ? 's' : ''}
@@ -882,7 +909,7 @@ function ClippingTool({ video, onClose }: { video: FileItem, onClose: () => void
     const gridCapacity = cols * imgRows;
     
     const savedInterval = Number(localStorage.getItem('batchInterval')) || 60;
-    const commonIntervals = [savedInterval, 1, 2, 5, 10, 15, 20, 30, 45, 60, 90, 120, 150, 180, 240, 300, 600, 900, 1200, 1800];
+    const commonIntervals = [savedInterval, 1, 2, 5, 10, 15, 20, 30, 45, 60, 90, 120, 150, 180, 200, 240, 300, 400, 500, 600, 900, 1200, 1800];
     
     let interval = savedInterval;
     let actualFrames = gridCapacity;
