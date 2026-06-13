@@ -155,7 +155,7 @@ def select_folder():
         return {"path": folder_path}
     return {"path": ""}
 
-def send_bytes_range_requests(file_path: str, start: int, end: int, chunk_size: int = 1_000_000):
+async def send_bytes_range_requests(file_path: str, start: int, end: int, chunk_size: int = 1_000_000):
     with open(file_path, "rb") as f:
         f.seek(start)
         while (pos := f.tell()) <= end:
@@ -164,6 +164,7 @@ def send_bytes_range_requests(file_path: str, start: int, end: int, chunk_size: 
             if not chunk:
                 break
             yield chunk
+            await asyncio.sleep(0)
 
 @app.get("/api/media")
 def get_media(request: Request, path: str):
