@@ -54,35 +54,42 @@ def format_size(size_bytes):
 
 import asyncio
 
+async def extract_single_frame(video_path, ts, out_path, semaphore):
+    async with semaphore:
+        cmd = [
+            "ffmpeg", "-y", "-hwaccel", "auto", "-ss", str(ts), "-i", str(video_path),
+            "-frames:v", "1", "-q:v", "2", str(out_path)
+        ]
+        try:
+            creation_flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                creationflags=creation_flags
+            )
+            await process.wait()
+            if process.returncode == 0:
+                return out_path
+        except Exception:
+            pass
+        return None
+
 async def extract_frames(video_path, timestamps, interval_val, temp_dir):
-    """Extracts frames using a single ffmpeg call concurrently."""
-    fps_val = 1.0 / interval_val
-    out_pattern = os.path.join(temp_dir, "frame_%04d.jpg")
-    
-    cmd = [
-        "ffmpeg", "-y", "-hwaccel", "auto", "-i", str(video_path), 
-        "-vf", f"fps={fps_val}", "-q:v", "2", str(out_pattern)
-    ]
-    
-    try:
-        creation_flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            creationflags=creation_flags
-        )
-        await process.wait()
-    except Exception as e:
-        print(f"Error extracting frames: {e}")
-        return []
-        
+    """Extracts frames using fast-seeking concurrency."""
     extracted_files = []
-    generated = sorted([f for f in os.listdir(temp_dir) if f.endswith(".jpg")])
+    semaphore = asyncio.Semaphore(10)  # Max 10 concurrent ffmpeg processes
     
-    for i, f in enumerate(generated):
-        if i < len(timestamps):
-            extracted_files.append((os.path.join(temp_dir, f), format_duration(timestamps[i])))
+    tasks = []
+    for i, ts in enumerate(timestamps):
+        out_path = os.path.join(temp_dir, f"frame_{i:04d}.jpg")
+        tasks.append(extract_single_frame(video_path, ts, out_path, semaphore))
+        
+    results = await asyncio.gather(*tasks)
+    
+    for i, (out_path, ts) in enumerate(zip(results, timestamps)):
+        if out_path and os.path.exists(out_path):
+            extracted_files.append((out_path, format_duration(ts)))
             
     return extracted_files
 
